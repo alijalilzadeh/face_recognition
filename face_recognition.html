@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Face Recognition & Emotion Demo</title>
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background: #111;
+    }
+
+    video {
+      position: absolute;
+      border-radius: 10px;
+      /* 🪞 ONLY the video is mirrored now */
+      transform: scaleX(-1); 
+    }
+
+    canvas {
+      position: absolute;
+      border-radius: 10px;
+      /* 📝 Canvas stays normal so text is readable */
+    }
+    
+    #loading {
+      color: white;
+      font-family: sans-serif;
+      position: absolute;
+      z-index: 10;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="loading">Loading Face & Emotion Models... Please wait.</div>
+  <video id="video" width="720" height="560" autoplay muted></video>
+
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+  <script>
+    const video = document.getElementById("video");
+    const loadingText = document.getElementById("loading");
+
+    const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+
+    // 📦 Load Models
+    Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+      faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+    ])
+    .then(() => {
+      loadingText.style.display = "none";
+      startVideo();
+    })
+    .catch(err => console.error("Error loading models:", err));
+
+    // 🎥 Open Camera
+    function startVideo() {
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+          video.srcObject = stream;
+        })
+        .catch(err => {
+          console.error("Camera access denied or failed:", err);
+        });
+    }
+
+    // 🔍 Custom Face & Emotion Detect
+    video.addEventListener("play", () => {
+      const canvas = faceapi.createCanvasFromMedia(video);
+      document.body.append(canvas);
+
+      const displaySize = { width: video.width, height: video.height };
+      faceapi.matchDimensions(canvas, displaySize);
+
+      setInterval(async () => {
+        const detections = await faceapi.detectAllFaces(
+          video,
+          new faceapi.TinyFaceDetectorOptions()
+        ).withFaceExpressions();
+
+        const resized = faceapi.resizeResults(detections, displaySize);
+        const ctx = canvas.getContext("2d");
+        
+        // Clear the previous frame
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw boxes and text manually to account for the mirrored video
+        resized.forEach(result => {
+          const box = result.detection.box;
+          
+          // 🧮 Reverse the X coordinate to match the mirrored video
+          const flippedX = displaySize.width - box.x - box.width;
+
+          // 🟩 Draw the Face Box
+          ctx.beginPath();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = "#00ff00"; // Green box
+          ctx.rect(flippedX, box.y, box.width, box.height);
+          ctx.stroke();
+
+          // 🤔 Find the strongest emotion
+          const emotions = result.expressions;
+          const topEmotion = Object.keys(emotions).reduce((a, b) => emotions[a] > emotions[b] ? a : b);
+          const probability = Math.round(emotions[topEmotion] * 100);
+
+          // ✍️ Draw the Emotion Text normally
+          ctx.fillStyle = "#00ff00"; // Green text
+          ctx.font = "bold 18px Arial";
+          ctx.fillText(`${topEmotion} (${probability}%)`, flippedX, box.y - 10);
+        });
+      }, 100);
+    });
+  </script>
+
+</body>
+</html>
