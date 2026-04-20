@@ -5,33 +5,69 @@
   <title>Face Recognition & Emotion Demo</title>
 
   <style>
+    /* 🎨 Sleek, Modern Dark Mode UI */
     body {
       margin: 0;
       padding: 0;
       display: flex;
+      flex-direction: column;
       justify-content: center;
       align-items: center;
       height: 100vh;
-      background: #111;
+      background: #0f172a; 
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: #f8fafc;
+    }
+
+    h1 {
+      margin-bottom: 5px;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+
+    p {
+      color: #94a3b8;
+      margin-bottom: 25px;
+    }
+
+    .video-container {
+      position: relative;
+      width: 720px;
+      height: 560px;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      border: 4px solid #1e293b;
+      background: #000;
     }
 
     video {
       position: absolute;
-      border-radius: 10px;
-      /* 🪞 ONLY the video is mirrored now */
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
       transform: scaleX(-1); 
+      object-fit: cover;
     }
 
     canvas {
       position: absolute;
-      border-radius: 10px;
-      /* 📝 Canvas stays normal so text is readable */
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 5;
     }
     
     #loading {
-      color: white;
-      font-family: sans-serif;
       position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #38bdf8;
       z-index: 10;
     }
   </style>
@@ -39,8 +75,13 @@
 
 <body>
 
-  <div id="loading">Loading Face & Emotion Models... Please wait.</div>
-  <video id="video" width="720" height="560" autoplay muted></video>
+  <h1>Smart Face Dashboard</h1>
+  <p>Tracking Demographics and Emotion</p>
+
+  <div class="video-container">
+    <div id="loading">Loading AI Models...</div>
+    <video id="video" autoplay muted></video>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 
@@ -50,10 +91,11 @@
 
     const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
 
-    // 📦 Load Models
+    // 📦 Load Core Models
     Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-      faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+      faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
+      faceapi.nets.ageGenderNet.loadFromUri(MODEL_URL)
     ])
     .then(() => {
       loadingText.style.display = "none";
@@ -61,60 +103,82 @@
     })
     .catch(err => console.error("Error loading models:", err));
 
-    // 🎥 Open Camera
     function startVideo() {
       navigator.mediaDevices.getUserMedia({ video: true })
         .then(stream => {
           video.srcObject = stream;
         })
-        .catch(err => {
-          console.error("Camera access denied or failed:", err);
-        });
+        .catch(err => console.error("Camera access denied or failed:", err));
     }
 
-    // 🔍 Custom Face & Emotion Detect
     video.addEventListener("play", () => {
       const canvas = faceapi.createCanvasFromMedia(video);
-      document.body.append(canvas);
+      document.querySelector('.video-container').append(canvas);
 
-      const displaySize = { width: video.width, height: video.height };
+      const displaySize = { width: video.videoWidth || 720, height: video.videoHeight || 560 };
       faceapi.matchDimensions(canvas, displaySize);
+
+      let faceStates = [];
 
       setInterval(async () => {
         const detections = await faceapi.detectAllFaces(
           video,
           new faceapi.TinyFaceDetectorOptions()
-        ).withFaceExpressions();
+        )
+        .withFaceExpressions()
+        .withAgeAndGender();
 
         const resized = faceapi.resizeResults(detections, displaySize);
         const ctx = canvas.getContext("2d");
         
-        // Clear the previous frame
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Draw boxes and text manually to account for the mirrored video
-        resized.forEach(result => {
+        if (faceStates.length > resized.length) {
+          faceStates = faceStates.slice(0, resized.length);
+        }
+
+        resized.forEach((result, i) => {
           const box = result.detection.box;
-          
-          // 🧮 Reverse the X coordinate to match the mirrored video
           const flippedX = displaySize.width - box.x - box.width;
 
-          // 🟩 Draw the Face Box
+          // 🟦 Draw Face Box
           ctx.beginPath();
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = "#00ff00"; // Green box
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "#38bdf8"; 
           ctx.rect(flippedX, box.y, box.width, box.height);
           ctx.stroke();
 
-          // 🤔 Find the strongest emotion
+          if (!faceStates[i]) {
+            faceStates[i] = { ages: [] };
+          }
+          const state = faceStates[i];
+
+          // 📈 Age Smoothing
+          state.ages.push(result.age);
+          if (state.ages.length > 20) state.ages.shift(); 
+          const averageAge = Math.round(state.ages.reduce((a, b) => a + b, 0) / state.ages.length);
+
           const emotions = result.expressions;
           const topEmotion = Object.keys(emotions).reduce((a, b) => emotions[a] > emotions[b] ? a : b);
-          const probability = Math.round(emotions[topEmotion] * 100);
+          const emotionProb = Math.round(emotions[topEmotion] * 100);
+          
+          const gender = result.gender.charAt(0).toUpperCase() + result.gender.slice(1); 
 
-          // ✍️ Draw the Emotion Text normally
-          ctx.fillStyle = "#00ff00"; // Green text
-          ctx.font = "bold 18px Arial";
-          ctx.fillText(`${topEmotion} (${probability}%)`, flippedX, box.y - 10);
+          // 🎨 TEXT UI
+          const padding = 10;
+          
+          // Top Info Box (Slightly wider to accommodate the extra text)
+          ctx.fillStyle = "rgba(15, 23, 42, 0.75)";
+          ctx.fillRect(flippedX, box.y - 65, box.width + 40, 55);
+          
+          ctx.font = "bold 16px 'Segoe UI', Tahoma, sans-serif";
+          ctx.fillStyle = "#38bdf8"; 
+          
+          // 📝 EXACT FORMAT REQUESTED
+          ctx.fillText(`${gender} - Age : ${averageAge} years old`, flippedX + padding, box.y - 40);
+          
+          ctx.fillStyle = "#f8fafc"; 
+          ctx.fillText(`Mood: ${topEmotion} (${emotionProb}%)`, flippedX + padding, box.y - 18);
         });
       }, 100);
     });
